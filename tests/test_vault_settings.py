@@ -328,6 +328,22 @@ class TestRegressions(unittest.TestCase):
                     self.assertNotIn(tok, safe)
                     self.assertEqual(restore(safe, v)[0], src)
 
+    def test_structured_value_fails_closed(self):
+        """Values that look structured (URL / conn string / auth scheme) but where no inner
+        detector fires must still be hidden whole."""
+        for src, val in (('password = "Kx9;mode=Qz7"\n', "Kx9;mode=Qz7"), ('api_token = "abc://Zx8kQ2"\n', "Zx8kQ2"),
+                         ('secret = "Token zz"\n', "Token zz"), ('DB_PASSWORD="host=x;user=y"\n', "host=x;user=y")):
+            with self.subTest(src=src):
+                v = make_vault(tempfile.mkdtemp())
+                safe, _ = redact(src, v, make_cfg(rename_identifiers=False))
+                self.assertNotIn(val, safe)
+                self.assertEqual(restore(safe, v)[0], src)
+        # partial hiding still preferred when an inner detector fires
+        v = make_vault(tempfile.mkdtemp())
+        safe, _ = redact('DATABASE_URL = "postgres://app:Pw9xq2Lm@db/prod"\n', v, make_cfg(rename_identifiers=False))
+        self.assertIn("postgres://app:", safe)
+        self.assertNotIn("Pw9xq2Lm", safe)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -279,6 +279,7 @@ def detect(text: str, cfg=None, literals: Iterable[str] = ()) -> list[Finding]:
                 if _is_secret_value(m["val"], unquoted=True, key="X_KEY"):
                     found.append(Finding(m.start("val"), m.end("val"), kind))
 
+    structured: list[Finding] = []
     if on("key_assign"):
         qa, qp, ua, xe = _key_patterns(tuple(k for k in cfg.extra_keywords if k))
         for rx, unquoted in ((qa, False), (qp, False), (ua, True), (xe, False)):
@@ -286,8 +287,11 @@ def detect(text: str, cfg=None, literals: Iterable[str] = ()) -> list[Finding]:
                 val = m["val"]
                 if placeholder.fullmatch(m["key"]):
                     continue
-                # structured values: let URL_CRED / CONN_STR / AUTH_HEADER hide only the secret part
+                # structured values: let URL_CRED / CONN_STR / AUTH_HEADER hide only the secret part,
+                # but fail closed - if none of them finds anything inside, the whole value is hidden
                 if re.match(r"(?i)(?:Bearer|Basic|Token)\s", val) or "://" in val or (";" in val and "=" in val):
+                    if _is_secret_value(val, unquoted=False, key=m["key"]):
+                        structured.append(Finding(m.start("val"), m.end("val"), _key_kind(m["key"])))
                     continue
                 if _is_secret_value(val, unquoted=unquoted, key=m["key"]):
                     found.append(Finding(m.start("val"), m.end("val"), _key_kind(m["key"])))
@@ -335,6 +339,10 @@ def detect(text: str, cfg=None, literals: Iterable[str] = ()) -> list[Finding]:
     for lit in literals:
         if len(lit) >= 4:
             found += [Finding(m.start(), m.end(), "SECRET") for m in re.finditer(_literal_rx(lit), text)]
+
+    for sf in structured:
+        if not any(f.start < sf.end and f.end > sf.start for f in found):
+            found.append(sf)
 
     allow = set(cfg.never_hide)
     found = [f for f in found if f.end - f.start >= cfg.min_secret_len and text[f.start:f.end] not in allow
