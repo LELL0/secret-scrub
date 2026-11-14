@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+*.tmp
+vault.json
+settings.json
+.secret_scrub/
