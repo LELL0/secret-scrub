@@ -272,12 +272,14 @@ def detect(text: str, cfg=None, literals: Iterable[str] = ()) -> list[Finding]:
         if on(f"provider:{kind}"):
             found += [Finding(m.start(), m.end(), kind) for m in rx.finditer(text)]
 
+    inner: list[Finding] = []   # URL / auth-header / conn-string findings (partial hiding of structured values)
     for det, rx, kind in (("url_cred", URL_CRED, "URL_PASSWORD"), ("auth_header", AUTH_HEADER, "AUTH_TOKEN"),
                           ("conn_str", CONN_STR, "PASSWORD")):
         if on(det):
             for m in rx.finditer(text):
                 if _is_secret_value(m["val"], unquoted=True, key="X_KEY"):
                     found.append(Finding(m.start("val"), m.end("val"), kind))
+                    inner.append(found[-1])
 
     structured: list[Finding] = []
     if on("key_assign"):
@@ -340,13 +342,19 @@ def detect(text: str, cfg=None, literals: Iterable[str] = ()) -> list[Finding]:
         if len(lit) >= 4:
             found += [Finding(m.start(), m.end(), "SECRET") for m in re.finditer(_literal_rx(lit), text)]
 
-    for sf in structured:
-        if not any(f.start < sf.end and f.end > sf.start for f in found):
-            found.append(sf)
-
     allow = set(cfg.never_hide)
-    found = [f for f in found if f.end - f.start >= cfg.min_secret_len and text[f.start:f.end] not in allow
-             and not placeholder.fullmatch(text[f.start:f.end])]
+
+    def keep(f: Finding) -> bool:
+        return (f.end - f.start >= cfg.min_secret_len and text[f.start:f.end] not in allow
+                and not placeholder.fullmatch(text[f.start:f.end]))
+
+    # structured key values: partial hiding only when a URL / auth / conn-string finding inside the
+    # value survives the filters; otherwise fail closed and hide the whole value
+    inner = [f for f in inner if keep(f)]
+    for sf in structured:
+        if not any(f.start >= sf.start and f.end <= sf.end for f in inner):
+            found.append(sf)
+    found = [f for f in found if keep(f)]
     return merge(found)
 
 

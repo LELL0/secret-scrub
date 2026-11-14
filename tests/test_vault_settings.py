@@ -338,6 +338,16 @@ class TestRegressions(unittest.TestCase):
                 safe, _ = redact(src, v, make_cfg(rename_identifiers=False))
                 self.assertNotIn(val, safe)
                 self.assertEqual(restore(safe, v)[0], src)
+        # an unrelated finding inside the value (IP) or a filtered-out inner finding must not
+        # stop the whole value from being hidden
+        for src, val, over in (('password = "Kx9;host=10.1.2.3;Qz7"\n', "Kx9", {}),
+                               ('token = "Bearer abcdefghijkl12"\n', "Bearer abcdefghijkl12",
+                                {"never_hide": ["abcdefghijkl12"]})):
+            with self.subTest(src=src):
+                v = make_vault(tempfile.mkdtemp())
+                safe, _ = redact(src, v, make_cfg(rename_identifiers=False, **over))
+                self.assertNotIn(val, safe)
+                self.assertEqual(restore(safe, v)[0], src)
         # partial hiding still preferred when an inner detector fires
         v = make_vault(tempfile.mkdtemp())
         safe, _ = redact('DATABASE_URL = "postgres://app:Pw9xq2Lm@db/prod"\n', v, make_cfg(rename_identifiers=False))
